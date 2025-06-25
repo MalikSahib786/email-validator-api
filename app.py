@@ -1,13 +1,13 @@
-import requests # Use requests library for HTTP calls
+import requests
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import validate_email
 from fastapi.middleware.cors import CORSMiddleware
 
 # --- Initialize FastAPI App ---
 app = FastAPI(
-    title="Free Email Validator API - Unblockable Version",
+    title="Free Email Validator API - Final Version",
     description="An API that uses DNS-over-HTTPS to bypass platform network restrictions.",
-    version="2.0.0",
+    version="3.0.0",
 )
 
 app.add_middleware(
@@ -18,11 +18,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- The Core Validation Logic (Our "Machine") ---
+# --- The Core Validation Logic (Corrected) ---
 
 def validate_email_full(email: str):
     """
     Performs a two-stage validation using a public API for DNS checks.
+    This version correctly parses the Cloudflare API response.
     """
     validation_results = {
         "email": email,
@@ -34,7 +35,7 @@ def validate_email_full(email: str):
         "reason": ""
     }
 
-    # === Stage 1: Syntax Validation (No change) ===
+    # === Stage 1: Syntax Validation ===
     try:
         local_part, domain = validate_email(email)
         validation_results["checks"]["syntax_valid"] = True
@@ -42,31 +43,26 @@ def validate_email_full(email: str):
         validation_results["reason"] = "Invalid email syntax."
         return validation_results
 
-    # === Stage 2: DNS (MX Record) Validation via DNS-over-HTTPS ===
-    # This method will not be blocked by free hosting platforms.
+    # === Stage 2: DNS (MX Record) Validation via DNS-over-HTTPS (Corrected Logic) ===
     try:
-        # We use Cloudflare's public DNS API
         url = f"https://cloudflare-dns.com/dns-query?name={domain}&type=MX"
         headers = {'accept': 'application/dns-json'}
-
-        # Make the web request
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
-
+        response.raise_for_status()
         data = response.json()
 
-        # Check if the 'Answer' key exists and is not empty
-        if data.get("Answer"):
+        # CORRECTED LOGIC: First check the status, then check for the answer.
+        # Status 0 means NOERROR.
+        if data.get("Status") == 0 and "Answer" in data:
             validation_results["checks"]["domain_has_mx_records"] = True
             validation_results["is_valid"] = True
             validation_results["reason"] = "Email syntax is valid and domain has MX records."
         else:
-            validation_results["reason"] = "Domain exists but has no MX records."
+            validation_results["reason"] = "Domain is valid but does not have any MX records."
 
     except requests.exceptions.Timeout:
         validation_results["reason"] = "DNS query via API timed out."
     except requests.exceptions.RequestException as e:
-        # This will catch other network errors
         validation_results["reason"] = f"Failed to query DNS via API. Error: {e}"
 
     return validation_results
@@ -74,7 +70,7 @@ def validate_email_full(email: str):
 @app.get("/")
 def read_root():
     return {
-        "message": "Welcome to the Email Validator API! (Unblockable Version)",
+        "message": "Welcome to the Email Validator API! (Final Version)",
     }
 
 @app.get("/validate")
