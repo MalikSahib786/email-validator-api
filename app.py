@@ -1,14 +1,11 @@
 import requests
-import json
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import validate_email
+from pydantic import validate_email, EmailStr
 from fastapi.middleware.cors import CORSMiddleware
 
-# --- Initialize FastAPI App ---
 app = FastAPI(
-    title="Free Email Validator API - 100% Working Version",
-    description="An API that uses DNS-over-HTTPS to bypass platform network restrictions.",
-    version="5.0.0",
+    title="Email Validator - The Working One",
+    version="6.0.0",
 )
 
 app.add_middleware(
@@ -19,62 +16,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- The Core Validation Logic (Corrected) ---
-
 def validate_email_full(email: str):
-    validation_results = {
+    response = {
         "email": email,
         "is_valid": False,
-        "checks": {
-            "syntax_valid": False,
-            "domain_has_mx_records": False,
-        },
-        "reason": ""
+        "checks": {"syntax_valid": False, "domain_has_mx_records": False},
+        "reason": "Validation not started."
     }
 
-    # === Stage 1: Syntax Validation AND GETTING THE DOMAIN ===
+    # === Stage 1: Syntax Validation ===
     try:
-        # Pydantic's validate_email returns (local_part, domain_part)
-        # This is where the original bug was! We need the 'domain' part.
-        local_part, domain = validate_email(email)
-        validation_results["checks"]["syntax_valid"] = True
-    except ValueError:
-        validation_results["reason"] = "Invalid email syntax."
-        return validation_results
+        validated_email: EmailStr = validate_email(email)[1]
+        domain = validated_email.split('@')[1]
+        response["checks"]["syntax_valid"] = True
+    except (ValueError, IndexError):
+        response["reason"] = "Invalid email syntax."
+        return response
 
-    # === Stage 2: DNS (MX Record) Validation via DNS-over-HTTPS ===
+    # === Stage 2: DNS MX Record Validation via DNS-over-HTTPS ===
     try:
-        # We use the 'domain' variable from Stage 1, NOT the full 'email'.
-        # THIS WAS THE BUG!
         url = f"https://cloudflare-dns.com/dns-query?name={domain}&type=MX"
-        
         headers = {'accept': 'application/dns-json'}
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        data = response.json()
+        api_response = requests.get(url, headers=headers, timeout=10)
+        api_response.raise_for_status()
+        data = api_response.json()
 
-        # The logic to check the response is now correct.
-        if data.get("Status") == 0 and data.get("Answer"):
-            validation_results["checks"]["domain_has_mx_records"] = True
-            validation_results["is_valid"] = True
-            validation_results["reason"] = "Email syntax is valid and domain has MX records."
+        # The most robust check possible:
+        # 1. Check if the response status is 0 (NOERROR)
+        # 2. Check if the "Answer" key exists in the response
+        # 3. Check if the list associated with "Answer" is not empty
+        if data.get("Status") == 0 and "Answer" in data and len(data["Answer"]) > 0:
+            response["checks"]["domain_has_mx_records"] = True
+            response["is_valid"] = True
+            response["reason"] = "Email syntax is valid and domain has MX records."
         else:
-            validation_results["reason"] = "Domain is valid but does not have any MX records."
+            response["reason"] = "The domain is valid but does not have any MX records."
 
     except requests.exceptions.RequestException as e:
-        validation_results["reason"] = f"Failed to query DNS via API. Error: {e}"
+        response["reason"] = f"Network error when checking domain: {e}"
 
-    return validation_results
+    return response
 
 @app.get("/")
 def read_root():
-    return {
-        "message": "Welcome to the Email Validator API! (Working Version)",
-    }
+    return {"message": "Welcome to the final, working Email Validator API!"}
 
 @app.get("/validate")
 def validate_email_endpoint(email: str = Query(..., description="The email address to validate.")):
     if not email:
         raise HTTPException(status_code=400, detail="Email query parameter is required.")
-    result = validate_email_full(email)
-    return result
+    return validate_email_full(email)
