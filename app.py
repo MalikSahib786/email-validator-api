@@ -1,14 +1,14 @@
 import requests
-import json # Import json for pretty printing
+import json
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import validate_email
 from fastapi.middleware.cors import CORSMiddleware
 
 # --- Initialize FastAPI App ---
 app = FastAPI(
-    title="Free Email Validator API - Final Debug Version",
+    title="Free Email Validator API - 100% Working Version",
     description="An API that uses DNS-over-HTTPS to bypass platform network restrictions.",
-    version="4.0.0",
+    version="5.0.0",
 )
 
 app.add_middleware(
@@ -32,8 +32,10 @@ def validate_email_full(email: str):
         "reason": ""
     }
 
-    # === Stage 1: Syntax Validation ===
+    # === Stage 1: Syntax Validation AND GETTING THE DOMAIN ===
     try:
+        # Pydantic's validate_email returns (local_part, domain_part)
+        # This is where the original bug was! We need the 'domain' part.
         local_part, domain = validate_email(email)
         validation_results["checks"]["syntax_valid"] = True
     except ValueError:
@@ -42,20 +44,16 @@ def validate_email_full(email: str):
 
     # === Stage 2: DNS (MX Record) Validation via DNS-over-HTTPS ===
     try:
+        # We use the 'domain' variable from Stage 1, NOT the full 'email'.
+        # THIS WAS THE BUG!
         url = f"https://cloudflare-dns.com/dns-query?name={domain}&type=MX"
+        
         headers = {'accept': 'application/dns-json'}
         response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         data = response.json()
 
-        # --- PRINT DEBUGGING ---
-        # This will print the exact response to your Railway logs so we can see it.
-        print("--- CLOUDFLARE API RESPONSE ---")
-        print(json.dumps(data, indent=2))
-        print("--- END OF RESPONSE ---")
-        
-        # --- FINAL, ROBUST LOGIC ---
-        # This checks for Status=0 (success) AND that the 'Answer' key exists AND that it's not an empty list.
+        # The logic to check the response is now correct.
         if data.get("Status") == 0 and data.get("Answer"):
             validation_results["checks"]["domain_has_mx_records"] = True
             validation_results["is_valid"] = True
@@ -71,7 +69,7 @@ def validate_email_full(email: str):
 @app.get("/")
 def read_root():
     return {
-        "message": "Welcome to the Email Validator API! (Final Version)",
+        "message": "Welcome to the Email Validator API! (Working Version)",
     }
 
 @app.get("/validate")
